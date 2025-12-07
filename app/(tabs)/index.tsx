@@ -13,8 +13,7 @@ import {
   onAuthStateChanged,
   signOut,
 } from 'firebase/auth';
-import { collection, getDocs } from 'firebase/firestore';
-import { auth, db } from '../../firebaseConfig';
+import { auth } from '../../firebaseConfig';
 import { setLoginInfo, getLoginInfo, clearLoginInfo } from '../../storage';
 
 type CurrentUser = {
@@ -22,63 +21,24 @@ type CurrentUser = {
   email: string | null;
 };
 
-type Mahasiswa = {
-  id: string;
-  nama: string;
-  nim: string;
-  jurusan: string;
-};
-
 export default function HomeTab() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-
-  const [students, setStudents] = useState<Mahasiswa[]>([]);
-  const [loadingStudents, setLoadingStudents] = useState(false);
-
-  async function loadStudents() {
-    try {
-      setLoadingStudents(true);
-
-      const snap = await getDocs(collection(db, 'mahasiswa'));
-
-      const data: Mahasiswa[] = snap.docs.map((doc) => {
-        const raw = doc.data();
-        console.log('Dokumen mahasiswa:', doc.id, raw);
-        return {
-          id: doc.id,
-          nama: String(raw.nama ?? ''),
-          nim: String(raw.nim ?? ''),
-          jurusan: String(raw.jurusan ?? ''),
-        };
-      });
-
-      setStudents(data);
-    } catch (err) {
-      console.log('Gagal load mahasiswa:', err);
-      Alert.alert('Error', 'Gagal mengambil data mahasiswa');
-    } finally {
-      setLoadingStudents(false);
-    }
-  }
 
   useEffect(() => {
     // restore dari MMKV kalau ada
     const local = getLoginInfo();
     if (local) {
       setCurrentUser({ uid: local.uid, email: local.email });
-      loadStudents();
     }
 
     // listen perubahan auth firebase
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser({ email: user.email, uid: user.uid });
-        loadStudents();
       } else {
         setCurrentUser(null);
-        setStudents([]);
       }
     });
 
@@ -92,8 +52,23 @@ export default function HomeTab() {
         email.trim(),
         password,
       );
-      setLoginInfo(cred.user); // simpan ke MMKV
-      Alert.alert('Success', 'Login berhasil!');
+
+      console.log('🔐 LOGIN ATTEMPT:', {
+        uid: cred.user.uid,
+        email: cred.user.email,
+      });
+      
+      // CRITICAL: Clear old data before saving new login
+      // This ensures app doesn't read data from previous user
+      setLoginInfo({
+        uid: cred.user.uid,
+        email: cred.user.email,
+        displayName: cred.user.displayName,
+      });
+      
+      console.log('✅ LOGIN SUCCESS - User data saved to MMKV');
+      
+      Alert.alert('Success', `Login sebagai ${cred.user.email}`);
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Terjadi kesalahan');
     }
@@ -103,12 +78,9 @@ export default function HomeTab() {
     signOut(auth);
     clearLoginInfo();
     setCurrentUser(null);
-    setStudents([]);
     setEmail('');
     setPassword('');
   };
-
-  const firstStudent = students.length > 0 ? students[0] : null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -137,41 +109,15 @@ export default function HomeTab() {
           <Text style={styles.text}>
             Login sebagai: {currentUser.email ?? '(tanpa email)'}
           </Text>
+          <Text style={styles.text}>
+            UID: {currentUser.uid}
+          </Text>
           <Button title="Logout" onPress={handleLogout} />
 
-          {/* CARD UTAMA – 1 DATA MAHASISWA */}
-          <Text style={styles.sectionTitle}>Data Mahasiswa di Firestore:</Text>
-
-          {loadingStudents ? (
-            <Text style={styles.text}>Memuat data...</Text>
-          ) : !firstStudent ? (
-            <Text style={styles.text}>Belum ada data mahasiswa.</Text>
-          ) : (
-            <View style={styles.highlightCard}>
-              <Text style={styles.cardName}>{firstStudent.nama}</Text>
-              <Text style={styles.cardText}>NIM: {firstStudent.nim}</Text>
-              <Text style={styles.cardText}>
-                Jurusan: {firstStudent.jurusan}
-              </Text>
-            </View>
-          )}
-
-          {/* LIST LENGKAP MAHASISWA */}
-          <Text style={styles.sectionTitle}>Data Mahasiswa</Text>
-
-          {loadingStudents ? (
-            <Text style={styles.text}>Memuat data...</Text>
-          ) : students.length === 0 ? (
-            <Text style={styles.text}>Belum ada data mahasiswa.</Text>
-          ) : (
-            students.map((mhs) => (
-              <View key={mhs.id} style={styles.card}>
-                <Text style={styles.cardName}>{mhs.nama}</Text>
-                <Text style={styles.cardText}>NIM: {mhs.nim}</Text>
-                <Text style={styles.cardText}>Jurusan: {mhs.jurusan}</Text>
-              </View>
-            ))
-          )}
+          <Text style={styles.sectionTitle}>💡 Info</Text>
+          <Text style={styles.text}>
+            Lihat data mahasiswa Anda di tab "Explore"
+          </Text>
         </>
       )}
     </ScrollView>

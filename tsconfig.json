@@ -5,7 +5,8 @@
     "strict": false,
     "allowJs": true,
     "skipLibCheck": true,
-    "moduleResolution": "node",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {

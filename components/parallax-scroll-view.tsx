@@ -27,7 +27,10 @@ export default function ParallaxScrollView({
   const colorScheme = useColorScheme() ?? 'light';
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const scrollOffset = useScrollOffset(scrollRef);
-  const headerAnimatedStyle = useAnimatedStyle(() => {
+  // `useAnimatedStyle` can return platform-specific animated styles.
+  // Use a runtime cast of the hook to `any` to avoid compile-time type mismatches
+  // between Reanimated's animation style types and React Native styles.
+  const headerAnimatedStyle: any = (useAnimatedStyle as any)(() => {
     return {
       transform: [
         {
@@ -53,7 +56,7 @@ export default function ParallaxScrollView({
         style={[
           styles.header,
           { backgroundColor: headerBackgroundColor[colorScheme] },
-          headerAnimatedStyle,
+          headerAnimatedStyle as any,
         ]}>
         {headerImage}
       </Animated.View>

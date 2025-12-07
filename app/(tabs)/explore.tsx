@@ -1,97 +1,115 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   ActivityIndicator,
 } from 'react-native';
-import { db } from '../../firebaseConfig';
-import { collection, getDocs } from 'firebase/firestore';
-
-type Mahasiswa = {
-  id: string;
-  nama: string;
-  nim: string;
-  jurusan: string;
-  angkatan: number;
-};
+import { useFocusEffect } from 'expo-router';
+import { useCallback } from 'react';
+import { auth, db } from '../../firebaseConfig';
+import { doc, getDoc } from 'firebase/firestore';
+import { getMahasiswaByUID, Mahasiswa } from '@/lib/firestore';
+import { storage } from '../../storage';
 
 export default function ExploreTab() {
-  const [data, setData] = useState<Mahasiswa[]>([]);
+  const [mahasiswa, setMahasiswa] = useState<Mahasiswa | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'mahasiswa'));
+  // ⭐ CRITICAL FIX: Use useFocusEffect instead of useEffect
+  // This ensures data is fetched EVERY TIME the Explore tab is focused
+  // Solves the bug where Explore was stuck on first user's data
+  useFocusEffect(
+    useCallback(() => {
+      async function loadUserData() {
+        try {
+          setLoading(true);
+          setError(null);
 
-        const result: Mahasiswa[] = snap.docs.map((doc) => {
-          const d = doc.data() as any;
-          
-          // Debug: log raw data dari Firestore
-          console.log('Raw Firestore doc:', doc.id, d);
-          
-          // Konversi explicit: jika angkatan adalah string, parse ke number
-          const angkatanValue = typeof d.angkatan === 'string' 
-            ? parseInt(d.angkatan, 10) 
-            : d.angkatan;
-          
-          console.log('Parsed angkatan:', angkatanValue);
-          
-          return {
-            id: doc.id,
-            nama: String(d.nama ?? ''),
-            nim: String(d.nim ?? ''),
-            jurusan: String(d.jurusan ?? ''),
-            angkatan: angkatanValue,
-          };
-        });
+          // Get UID from MMKV storage (updated on every login)
+          let uid = storage.getString('uid');
+          console.log('📱 Explore Read UID from MMKV:', uid);
 
-        console.log('Final result:', result);
-        setData(result);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching mahasiswa data:', error);
-        setLoading(false);
+          // Fallback: Try auth.currentUser
+          if (!uid && auth.currentUser) {
+            uid = auth.currentUser.uid;
+            console.log('📱 Fallback: Got UID from auth.currentUser:', uid);
+          }
+
+          if (!uid) {
+            console.warn('⚠️ No UID found - user not logged in');
+            setError('Silakan login terlebih dahulu');
+            setMahasiswa(null);
+            setLoading(false);
+            return;
+          }
+
+          // Query Firestore by UID
+          console.log('🔍 Querying Firestore for mahasiswa/{uid}:', uid);
+          const ref = doc(db, 'mahasiswa', uid);
+          const snap = await getDoc(ref);
+
+          if (snap.exists()) {
+            const data = snap.data() as Mahasiswa;
+            console.log('✅ Explore Data fetched:', data);
+            setMahasiswa(data);
+            setError(null);
+          } else {
+            console.warn('⚠️ No mahasiswa document found for UID:', uid);
+            setError('Data mahasiswa tidak ditemukan. Hubungi admin.');
+            setMahasiswa(null);
+          }
+
+          setLoading(false);
+        } catch (err) {
+          console.error('❌ Error loading mahasiswa:', err);
+          setError('Gagal mengambil data mahasiswa');
+          setMahasiswa(null);
+          setLoading(false);
+        }
       }
-    };
 
-    fetchData();
-  }, []);
+      loadUserData();
+    }, [])
+  );
 
   if (loading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator color="white" />
+        <ActivityIndicator color="white" size="large" />
         <Text style={styles.text}>Loading data mahasiswa...</Text>
       </View>
     );
   }
 
-  if (data.length === 0) {
+  if (error) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Belum ada data mahasiswa.</Text>
+        <Text style={[styles.text, { color: '#ff6b6b' }]}>{error}</Text>
+      </View>
+    );
+  }
+
+  if (!mahasiswa) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.text}>Data tidak tersedia</Text>
       </View>
     );
   }
 
   return (
-    <FlatList
-      style={{ backgroundColor: '#000' }}
-      data={data}
-      keyExtractor={(item) => item.id}
-      contentContainerStyle={{ padding: 20 }}
-      renderItem={({ item }: { item: Mahasiswa }) => (
-        <View style={styles.card}>
-          <Text style={styles.name}>{item.nama}</Text>
-          <Text style={styles.text}>NIM: {item.nim}</Text>
-          <Text style={styles.text}>Jurusan: {item.jurusan}</Text>
-          <Text style={styles.text}>Angkatan: {item.angkatan}</Text>
-        </View>
-      )}
-    />
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.name}>{mahasiswa.nama}</Text>
+        <Text style={styles.text}>NIM: {mahasiswa.nim}</Text>
+        <Text style={styles.text}>Jurusan: {mahasiswa.jurusan}</Text>
+        {mahasiswa.angkatan && (
+          <Text style={styles.text}>Angkatan: {mahasiswa.angkatan}</Text>
+        )}
+      </View>
+    </View>
   );
 }
 
@@ -101,13 +119,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
-  text: { color: 'white' },
+  text: {
+    color: 'white',
+    fontSize: 14,
+  },
   card: {
     backgroundColor: '#111',
-    padding: 15,
-    marginBottom: 12,
-    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00A2FF',
+    padding: 20,
+    borderRadius: 10,
+    width: '100%',
   },
-  name: { color: 'white', fontSize: 18, marginBottom: 6 },
+  name: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
 });
